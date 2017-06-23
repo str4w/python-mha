@@ -18,13 +18,14 @@ class new():
 	offset=spatial offset of data data
 	data_type='short', 'float' or 'uchar'
 	direction_cosines=direction cosines of the raw image/vf
+	num_components=number of components in the image/vf      
 	
 	 
 	CONSTRUCTOR OVERLOADING:
 	
 	img=mha.new() # All the public parameters will be set to None
 	img=mha.new(input_file='img.mha')
-	img=mha.new(data=matrix, size=[512, 512, 80], spacing=[0.9, 0.9, 5], offset=[-240, -240, -160], data_type='short', direction_cosines=[1, 0, 0, 0, 1, 0, 0, 0, 1])
+	img=mha.new(data=matrix, size=[512, 512, 80], spacing=[0.9, 0.9, 5], offset=[-240, -240, -160], data_type='short', direction_cosines=[1, 0, 0, 0, 1, 0, 0, 0, 1], num_components=1)
 	
 	
 	PUBLIC METHODS:
@@ -39,20 +40,22 @@ class new():
 	offset=None
 	data_type=None
 	direction_cosines=None
+	num_components=None     
 	
 ######################## CONSTRUCTOR - START - #########################
-	def __init__ (self, input_file=None, data=None, size=None, spacing=None, offset=None, data_type=None, direction_cosines=None):
+	def __init__ (self, input_file=None, data=None, size=None, spacing=None, offset=None, data_type=None, direction_cosines=None, num_components=None):
 		
-		if input_file!=None and data==None and size==None and spacing==None and offset==None and data_type==None and direction_cosines==None:
+		if input_file!=None and data==None and size==None and spacing==None and offset==None and data_type==None and direction_cosines==None and num_components==None:
 			self.read_mha(input_file)
 			
-		elif input_file==None and data!=None and size!=None and spacing!=None and offset!=None and data_type!=None and direction_cosines!=None:
+		elif input_file==None and data!=None and size!=None and spacing!=None and offset!=None and data_type!=None and direction_cosines!=None and num_components==None:
 			self.data=data
 			self.size=size
 			self.spacing=spacing
 			self.offset=offset
 			self.data_type=data_type
 			self.direction_cosines=direction_cosines
+			self.num_components=num_components                
 		
 		elif input_file==None and data==None and size==None and spacing==None and offset==None and data_type==None and direction_cosines==None:
 			pass
@@ -71,10 +74,10 @@ class new():
 		if fn.endswith('.mha'): ## Check if the file extension is ".mha"
 			
 			f = open(fn,'rb')
-			data='img' ## On default the matrix is considered to be an image
 	
 			## Read mha header
-			for r in range(20):
+                	self.num_components=1 ## On default the matrix is considered to be an image
+			while True:
 				
 				row=f.readline()
 				
@@ -90,9 +93,9 @@ class new():
 				elif row.startswith('DimSize ='):
 					row=row.split('=')[1].strip()
 					self.size=map(int, row.split())
-				elif row.startswith('ElementNumberOfChannels = 3'):
-					data='vf' ## The matrix is a vf
-					self.size.append(3)
+				elif row.startswith('ElementNumberOfChannels ='):
+					row=row.split('=')[1].strip()
+					self.num_components=int(row)     
 				elif row.startswith('ElementType ='):
 					data_type=row.split('=')[1].strip()
 				elif row.startswith('ElementDataFile ='):
@@ -112,13 +115,14 @@ class new():
 			elif data_type == 'MET_UCHAR':
 				self.data=np.fromstring(self.data, dtype=np.uint8)
 				self.data_type = 'uchar'
+			else:
+				raise Exception("Unknown Data Type: %s"%(data_type))
 			
 			## Reshape array
-			if data == 'img':
-				self.data=self.data.reshape(self.size[2],self.size[1],self.size[0]).T
-			elif data == 'vf':
-				self.data=self.data.reshape(self.size[2],self.size[1],self.size[0],3)
-				self.data=self._shiftdim(self.data, 3).T
+			if self.num_components==1:
+				self.data=self.data.reshape(self.size[2],self.size[1],self.size[0])
+			else:
+				self.data=self.data.reshape(self.size[2],self.size[1],self.size[0],self.num_components)
 			
 		elif not fn.endswith('.mha'): ## Extension file is not ".mha". It returns all null values
 			raise NameError('The input file is not a mha file!')
@@ -139,11 +143,6 @@ class new():
                         ## Order the matrix in the proper way
                         self.data = np.array(self.data, order = "F")
 			
-			## Check if the input matrix is an image or a vf
-			if self.data.ndim == 3:
-				data='img'
-			elif self.data.ndim == 4:
-				data='vf'
 			
 			f=open(fn, 'wb')
 			
@@ -159,19 +158,21 @@ class new():
 			f.write('AnatomicalOrientation = RAI\n')
 			f.write('ElementSpacing = '+str(self.spacing).strip('()[]').replace(',','')+'\n')
 			f.write('DimSize = '+str(self.size).strip('()[]').replace(',','')+'\n')
-			if data == 'vf':
-				f.write('ElementNumberOfChannels = 3\n')
-				self.data=self._shiftdim(self.data, 3) ## Shift dimensions if the input matrix is a vf
+			if self.num_components != 1:
+				f.write('ElementNumberOfChannels = %d\n'%(self.num_components))
+			#	self.data=self._shiftdim(self.data, 3) ## Shift dimensions if the input matrix is a vf
 			if self.data_type == 'short':
 				f.write('ElementType = MET_SHORT\n')
 			elif self.data_type == 'float':
 				f.write('ElementType = MET_FLOAT\n')
 			elif self.data_type == 'uchar':
 				f.write('ElementType = MET_UCHAR\n')
+			else:
+				raise Exception("Unknown Data Type: %s"%(self.data_type))
 			f.write('ElementDataFile = LOCAL\n')
 			
 			## Write matrix
-			f.write(self.data)
+			f.write(self.data.ravel())
 			f.close()
 			
 		elif not fn.endswith('.mha'): ## File extension is not ".mha"
